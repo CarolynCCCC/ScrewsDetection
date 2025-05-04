@@ -181,36 +181,42 @@ def generate_object_id(bbox, class_name):
 def xywhr_to_contour(xywhr, image_shape):
     """Convert xywhr format to contour points for cv2.findContours"""
     x, y, w, h, r = xywhr
-    cos_r = math.cos(r)
-    sin_r = math.sin(r)
     
     # Calculate half width and height
     half_w = w / 2
     half_h = h / 2
     
-    # Calculate the four corners relative to center
+    # Create the four corners relative to center
     corners = np.array([
-        [-half_w, -half_h],
-        [half_w, -half_h],
-        [half_w, half_h],
-        [-half_w, half_h]
+        [-half_w, -half_h],  # top-left
+        [half_w, -half_h],   # top-right
+        [half_w, half_h],    # bottom-right
+        [-half_w, half_h]    # bottom-left
     ])
     
-    # Rotate the corners
+    # Create rotation matrix
+    cos_r = math.cos(r)
+    sin_r = math.sin(r)
     rotation_matrix = np.array([
         [cos_r, -sin_r],
         [sin_r, cos_r]
     ])
     
+    # Rotate corners
     rotated_corners = np.dot(corners, rotation_matrix.T)
     
-    # Translate corners to absolute position
+    # Translate to image coordinates
     rotated_corners[:, 0] += x
     rotated_corners[:, 1] += y
     
+    # Ensure corners are within image bounds
+    rotated_corners = np.clip(rotated_corners, 0, np.array([image_shape[1], image_shape[0]]))
+    
+    # Convert to integer coordinates
+    corners_int = rotated_corners.astype(np.int32)
+    
     # Create a binary mask
     mask = np.zeros(image_shape[:2], dtype=np.uint8)
-    corners_int = rotated_corners.astype(int)
     
     # Draw the rotated rectangle on the mask
     cv2.fillPoly(mask, [corners_int], 255)
@@ -218,7 +224,11 @@ def xywhr_to_contour(xywhr, image_shape):
     # Find contours
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     
-    return contours[0] if contours else None
+    if contours:
+        # Get the largest contour
+        contour = max(contours, key=cv2.contourArea)
+        return contour
+    return None
 
 def process_frame(frame, px_to_mm_ratio=None):
     """Process a single frame and return annotated image and detection data"""
@@ -291,6 +301,10 @@ def process_frame(frame, px_to_mm_ratio=None):
                 if contour is not None:
                     # Draw contour
                     cv2.drawContours(frame_rgb, [contour], -1, color, BORDER_WIDTH)
+                    
+                    # Draw the four corners for debugging
+                    for point in contour:
+                        cv2.circle(frame_rgb, tuple(point[0]), 3, (255, 0, 0), -1)
                 
                 # Draw orientation indicator if enabled
                 if SHOW_ORIENTATION:
