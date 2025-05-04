@@ -72,7 +72,7 @@ with st.sidebar:
     
     # Image Processing Controls
     st.subheader("Image Processing")
-    binary_threshold = st.slider("Binary Threshold", 0, 255, 150)
+    binary_threshold = st.slider("Binary Threshold", 0, 255, 80)
     st.session_state.binary_threshold = binary_threshold
     
     blur_kernel = st.slider("Blur Kernel Size", 1, 15, 5, step=2)
