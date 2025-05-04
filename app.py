@@ -316,7 +316,7 @@ def process_frame(frame, px_to_mm_ratio=None):
                 current_px_to_mm_ratio = COIN_DIAMETER_MM / coin_diameter_px
                 break
     
-    # Process each detection - first find contours on the original frame
+    # Process each detection
     for detection in filtered_detections:
         if len(detection.cls) > 0 and len(detection.xywhr) > 0 and len(detection.xyxy) > 0:
             class_id = int(detection.cls[0])
@@ -325,7 +325,20 @@ def process_frame(frame, px_to_mm_ratio=None):
             x1, y1, x2, y2 = map(int, detection.xyxy[0])
             class_name = CLASS_NAMES.get(class_id, f"Class {int(class_id)}")
             color = CATEGORY_COLORS.get(class_name, (0, 255, 0))
+
+            # Generate unique ID for the object
+            obj_id = generate_object_id((x1, y1, x2, y2), class_name)
             
+            # Only count if not tracked before
+            if obj_id not in st.session_state.tracked_objects:
+                detected_objects.append({
+                    "class_name": class_name,
+                    "bbox": (x1, y1, x2, y2),
+                    "confidence": float(confidence),
+                    "orientation": float(xywhr[4])
+                })
+                st.session_state.tracked_objects[obj_id] = class_name
+
             # Get OBB corners
             corners = xywhr_to_corners(xywhr)
             
@@ -360,32 +373,6 @@ def process_frame(frame, px_to_mm_ratio=None):
                 if significant_contours:
                     # Draw the contours on the RGB frame
                     cv2.drawContours(frame_rgb, significant_contours, -1, color, 2)
-            
-            # Generate unique ID for the object
-            obj_id = generate_object_id((x1, y1, x2, y2), class_name)
-            
-            # Only count if not tracked before
-            if obj_id not in st.session_state.tracked_objects:
-                detected_objects.append({
-                    "class_name": class_name,
-                    "bbox": (x1, y1, x2, y2),
-                    "confidence": float(confidence),
-                    "orientation": float(xywhr[4])
-                })
-                st.session_state.tracked_objects[obj_id] = class_name
-    
-    # Now draw OBBs, orientation indicators, and labels on top of the contours
-    for detection in filtered_detections:
-        if len(detection.cls) > 0 and len(detection.xywhr) > 0 and len(detection.xyxy) > 0:
-            class_id = int(detection.cls[0])
-            confidence = detection.conf[0]
-            xywhr = detection.xywhr[0].cpu().numpy()
-            x1, y1, x2, y2 = map(int, detection.xyxy[0])
-            class_name = CLASS_NAMES.get(class_id, f"Class {int(class_id)}")
-            color = CATEGORY_COLORS.get(class_name, (0, 255, 0))
-            
-            # Get OBB corners
-            corners = xywhr_to_corners(xywhr)
             
             # Draw OBB with class-specific color
             cv2.polylines(frame_rgb, [corners.astype(np.int32)], True, color, 2)
@@ -429,6 +416,7 @@ def process_frame(frame, px_to_mm_ratio=None):
                       (255, 255, 255), thickness)
 
     return frame_rgb, detected_objects, current_px_to_mm_ratio
+
 class VideoCallback:
     def __init__(self):
         self.px_to_mm_ratio = None
