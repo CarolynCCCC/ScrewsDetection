@@ -299,26 +299,34 @@ def process_frame(frame, px_to_mm_ratio=None):
                 # Create a region of interest (ROI) for the detection
                 roi = frame_rgb[y1:y2, x1:x2]
                 if roi.size > 0:  # Check if ROI is valid
-                    # Split into color channels
-                    blue, green, red = cv2.split(roi)
+                    # Convert ROI to grayscale
+                    gray = cv2.cvtColor(roi, cv2.COLOR_RGB2GRAY)
                     
-                    # Find contours in each channel
-                    contours_blue, _ = cv2.findContours(blue, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
-                    contours_green, _ = cv2.findContours(green, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
-                    contours_red, _ = cv2.findContours(red, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
+                    # Apply Gaussian blur to reduce noise
+                    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
                     
-                    # Combine all contours
-                    all_contours = contours_blue + contours_green + contours_red
+                    # Apply Canny edge detection
+                    edges = cv2.Canny(blurred, 50, 150)
                     
-                    if all_contours:
+                    # Dilate the edges to make them more connected
+                    kernel = np.ones((3,3), np.uint8)
+                    dilated = cv2.dilate(edges, kernel, iterations=1)
+                    
+                    # Find contours
+                    contours, _ = cv2.findContours(dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                    
+                    if contours:
                         # Get the largest contour
-                        largest_contour = max(all_contours, key=cv2.contourArea)
+                        largest_contour = max(contours, key=cv2.contourArea)
                         
                         # Adjust contour coordinates to global image coordinates
                         adjusted_contour = largest_contour + np.array([x1, y1])
                         
-                        # Draw contour
-                        cv2.drawContours(frame_rgb, [adjusted_contour], -1, color, BORDER_WIDTH, lineType=cv2.LINE_AA)
+                        # Draw contour with thicker lines
+                        cv2.drawContours(frame_rgb, [adjusted_contour], -1, color, 3, lineType=cv2.LINE_AA)
+                        
+                        # Draw the bounding box for reference
+                        cv2.rectangle(frame_rgb, (x1, y1), (x2, y2), (255, 0, 0), 2)
                 
                 # Draw orientation indicator if enabled
                 if SHOW_ORIENTATION:
