@@ -317,7 +317,6 @@ def process_frame(frame, px_to_mm_ratio=None):
             corners = xywhr_to_corners(xywhr)
             
             # Create a slightly larger mask for contour detection
-            # while keeping the original OBB for visualization
             expand_factor = 1.1  # Expand the mask by 10%
             center = np.mean(corners, axis=0)
             expanded_corners = corners.copy()
@@ -360,7 +359,8 @@ def process_frame(frame, px_to_mm_ratio=None):
                     significant_contours = []
                     for contour in contours:
                         area = cv2.contourArea(contour)
-                        if area > 100:  # Minimum area threshold
+                        # Filter out contours that are too small or too large (likely the bounding box)
+                        if area > 100 and area < (roi.shape[0] * roi.shape[1] * 0.8):  # Max 80% of ROI area
                             significant_contours.append(contour)
                     
                     if significant_contours:
