@@ -302,7 +302,6 @@ def process_frame(frame, px_to_mm_ratio=None):
     
     # Convert frame to RGB for drawing
     frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    original_frame_rgb = cv2.cvtColor(original_frame, cv2.COLOR_BGR2RGB)
     
     detected_objects = []
     current_px_to_mm_ratio = px_to_mm_ratio
@@ -326,36 +325,51 @@ def process_frame(frame, px_to_mm_ratio=None):
             class_name = CLASS_NAMES.get(class_id, f"Class {int(class_id)}")
             color = CATEGORY_COLORS.get(class_name, (0, 255, 0))
             
-            # Get OBB corners
-            corners = xywhr_to_corners(xywhr)
+            # Get the center of the detection
+            center_x, center_y = int(xywhr[0]), int(xywhr[1])
             
-            # Create a mask for the rotated bounding box
+            # Create a slightly expanded mask to include some context around the object
+            # This helps avoid detecting the edge of the mask as the contour
+            expansion_factor = 1.2  # Expand by 20%
+            
+            # Calculate expanded box dimensions
+            expanded_width = xywhr[2] * expansion_factor
+            expanded_height = xywhr[3] * expansion_factor
+            
+            # Create expanded corners - we keep the same orientation
+            expanded_corners = xywhr_to_corners([xywhr[0], xywhr[1], 
+                                               expanded_width, expanded_height, 
+                                               xywhr[4]])
+            
+            # Create mask from expanded corners
             mask = np.zeros(original_frame.shape[:2], dtype=np.uint8)
-            cv2.fillPoly(mask, [corners.astype(np.int32)], 255)
+            cv2.fillPoly(mask, [expanded_corners.astype(np.int32)], 255)
             
-            # Extract the region inside the mask from the original frame
+            # Extract region inside mask from original frame
             roi = cv2.bitwise_and(original_frame, original_frame, mask=mask)
             
-            # Convert ROI to grayscale for contour detection
+            # Convert ROI to grayscale
             roi_gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
             
-            # Apply preprocessing for better contour detection
+            # Apply Gaussian blur to reduce noise
             blurred = cv2.GaussianBlur(roi_gray, (st.session_state.blur_kernel, st.session_state.blur_kernel), 0)
-            _, thresh = cv2.threshold(blurred, st.session_state.binary_threshold, 255, cv2.THRESH_BINARY)
             
-            # Apply morphological operations
+            # Apply edge detection (Canny) instead of just thresholding
+            # This will find the edges of the object, not the edges of the mask
+            low_threshold = st.session_state.binary_threshold - 50  # Adjust based on your needs
+            high_threshold = st.session_state.binary_threshold + 50  # Adjust based on your needs
+            edges = cv2.Canny(blurred, low_threshold, high_threshold)
+            
+            # Dilate the edges to connect broken lines
             kernel = np.ones((3, 3), np.uint8)
-            if st.session_state.erode_iterations > 0:
-                thresh = cv2.erode(thresh, kernel, iterations=st.session_state.erode_iterations)
-            if st.session_state.dilate_iterations > 0:
-                thresh = cv2.dilate(thresh, kernel, iterations=st.session_state.dilate_iterations)
+            dilated_edges = cv2.dilate(edges, kernel, iterations=st.session_state.dilate_iterations)
             
-            # Find contours in the thresholded image
-            contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            # Find contours on the edge image
+            contours, _ = cv2.findContours(dilated_edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             
             if contours:
                 # Filter small contours
-                significant_contours = [c for c in contours if cv2.contourArea(c) > 50]
+                significant_contours = [c for c in contours if cv2.contourArea(c) > 20]
                 
                 if significant_contours:
                     # Draw the contours on the RGB frame
