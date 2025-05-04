@@ -57,10 +57,16 @@ model = YOLO("yolo11-obb12classes.pt")
 # Initialize session state for tracking
 if 'tracked_objects' not in st.session_state:
     st.session_state.tracked_objects = {}  # Changed from set to dict to store class info
+if 'binary_threshold' not in st.session_state:
+    st.session_state.binary_threshold = 150
 
 # Sidebar controls
 with st.sidebar:
     st.header("Settings")
+    
+    # Binary threshold slider
+    binary_threshold = st.slider("Binary Threshold", 0, 255, 150)
+    st.session_state.binary_threshold = binary_threshold
     
     input_method = st.radio(
         "Input Source",
@@ -334,8 +340,8 @@ def process_frame(frame, px_to_mm_ratio=None):
                     # Convert ROI to grayscale
                     gray = cv2.cvtColor(roi, cv2.COLOR_RGB2GRAY)
                     
-                    # Apply binary thresholding
-                    _, thresh = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY)
+                    # Apply binary thresholding with the slider value
+                    _, thresh = cv2.threshold(gray, st.session_state.binary_threshold, 255, cv2.THRESH_BINARY)
                     
                     # Find contours
                     contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
