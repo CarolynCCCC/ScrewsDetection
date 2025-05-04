@@ -316,11 +316,18 @@ def process_frame(frame, px_to_mm_ratio=None):
             # Get OBB corners
             corners = xywhr_to_corners(xywhr)
             
-            # Create a mask for the OBB region
-            mask = np.zeros(frame.shape[:2], dtype=np.uint8)
-            cv2.fillPoly(mask, [corners.astype(np.int32)], 255)
+            # Create a slightly larger mask for contour detection
+            # while keeping the original OBB for visualization
+            expand_factor = 1.1  # Expand the mask by 10%
+            center = np.mean(corners, axis=0)
+            expanded_corners = corners.copy()
+            expanded_corners = center + (expanded_corners - center) * expand_factor
             
-            # Extract the OBB region
+            # Create mask with expanded corners
+            mask = np.zeros(frame.shape[:2], dtype=np.uint8)
+            cv2.fillPoly(mask, [expanded_corners.astype(np.int32)], 255)
+            
+            # Extract the OBB region with expanded mask
             roi = cv2.bitwise_and(frame_rgb, frame_rgb, mask=mask)
             roi = roi[y1:y2, x1:x2]  # Crop to the axis-aligned bbox for processing
             
