@@ -296,15 +296,29 @@ def process_frame(frame, px_to_mm_ratio=None):
                 label_text += ", Dia: N/A (No Ratio)"
 
             if SHOW_DETECTIONS:
-                # Get contour from OBB
-                contour = xywhr_to_contour(xywhr, frame.shape)
-                if contour is not None:
-                    # Draw contour
-                    cv2.drawContours(frame_rgb, [contour], -1, color, BORDER_WIDTH)
+                # Create a region of interest (ROI) for the detection
+                roi = frame_rgb[y1:y2, x1:x2]
+                if roi.size > 0:  # Check if ROI is valid
+                    # Split into color channels
+                    blue, green, red = cv2.split(roi)
                     
-                    # Draw the four corners for debugging
-                    for point in contour:
-                        cv2.circle(frame_rgb, tuple(point[0]), 3, (255, 0, 0), -1)
+                    # Find contours in each channel
+                    contours_blue, _ = cv2.findContours(blue, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
+                    contours_green, _ = cv2.findContours(green, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
+                    contours_red, _ = cv2.findContours(red, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
+                    
+                    # Combine all contours
+                    all_contours = contours_blue + contours_green + contours_red
+                    
+                    if all_contours:
+                        # Get the largest contour
+                        largest_contour = max(all_contours, key=cv2.contourArea)
+                        
+                        # Adjust contour coordinates to global image coordinates
+                        adjusted_contour = largest_contour + np.array([x1, y1])
+                        
+                        # Draw contour
+                        cv2.drawContours(frame_rgb, [adjusted_contour], -1, color, BORDER_WIDTH, lineType=cv2.LINE_AA)
                 
                 # Draw orientation indicator if enabled
                 if SHOW_ORIENTATION:
