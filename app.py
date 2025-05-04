@@ -148,7 +148,7 @@ def xywhr_to_corners(xywhr):
     return rotated_corners.astype(int)
 
 def non_max_suppression(detections, iou_threshold):
-    """Improved NMS for OBB that keeps unique object detections"""
+    """Improved NMS for OBB that keeps only the highest confidence detection for each physical object"""
     if len(detections) == 0:
         return []
 
@@ -203,9 +203,8 @@ def non_max_suppression(detections, iou_threshold):
         # Calculate IoU
         ious = interArea / (currentArea + restAreas - interArea + 1e-6)
         
-        # Keep boxes that have IoU less than threshold or are of different classes
-        same_class = (classes[rest] == classes[current])
-        to_keep = ~(same_class & (ious > iou_threshold))
+        # Keep boxes that have IoU less than threshold (regardless of class)
+        to_keep = (ious <= iou_threshold)
         indices = rest[to_keep]
 
     return [detections[i] for i in keep_indices]
