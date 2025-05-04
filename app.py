@@ -351,7 +351,7 @@ def process_frame(frame, px_to_mm_ratio=None):
                 thresh = cv2.dilate(thresh, kernel, iterations=st.session_state.dilate_iterations)
             
             # Find contours in the thresholded image
-            contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
             
             if contours:
                 # Filter small contours
