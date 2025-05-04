@@ -178,6 +178,48 @@ def generate_object_id(bbox, class_name):
     x1, y1, x2, y2 = map(int, bbox)
     return hashlib.md5(f"{x1}{y1}{x2}{y2}{class_name}".encode()).hexdigest()
 
+def xywhr_to_contour(xywhr, image_shape):
+    """Convert xywhr format to contour points for cv2.findContours"""
+    x, y, w, h, r = xywhr
+    cos_r = math.cos(r)
+    sin_r = math.sin(r)
+    
+    # Calculate half width and height
+    half_w = w / 2
+    half_h = h / 2
+    
+    # Calculate the four corners relative to center
+    corners = np.array([
+        [-half_w, -half_h],
+        [half_w, -half_h],
+        [half_w, half_h],
+        [-half_w, half_h]
+    ])
+    
+    # Rotate the corners
+    rotation_matrix = np.array([
+        [cos_r, -sin_r],
+        [sin_r, cos_r]
+    ])
+    
+    rotated_corners = np.dot(corners, rotation_matrix.T)
+    
+    # Translate corners to absolute position
+    rotated_corners[:, 0] += x
+    rotated_corners[:, 1] += y
+    
+    # Create a binary mask
+    mask = np.zeros(image_shape[:2], dtype=np.uint8)
+    corners_int = rotated_corners.astype(int)
+    
+    # Draw the rotated rectangle on the mask
+    cv2.fillPoly(mask, [corners_int], 255)
+    
+    # Find contours
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    
+    return contours[0] if contours else None
+
 def process_frame(frame, px_to_mm_ratio=None):
     """Process a single frame and return annotated image and detection data"""
     results = model(frame, conf=CONFIDENCE_THRESHOLD)
@@ -251,28 +293,25 @@ def process_frame(frame, px_to_mm_ratio=None):
                 label_text += ", Dia: N/A (No Ratio)"
 
             if SHOW_DETECTIONS:
-                # Get OBB corners
-                corners = xywhr_to_corners(xywhr)
-                
-                # Draw rotated rectangle
-                for i in range(4):
-                    start_point = tuple(corners[i])
-                    end_point = tuple(corners[(i + 1) % 4])
-                    draw.line([start_point, end_point], fill=color, width=BORDER_WIDTH)
+                # Get contour from OBB
+                contour = xywhr_to_contour(xywhr, frame.shape)
+                if contour is not None:
+                    # Draw contour
+                    cv2.drawContours(frame, [contour], -1, color, BORDER_WIDTH)
                 
                 # Draw orientation indicator if enabled
                 if SHOW_ORIENTATION:
                     center = (int(xywhr[0]), int(xywhr[1]))
                     endpoint = (int(center[0] + 20 * math.cos(xywhr[4])), 
                                 int(center[1] + 20 * math.sin(xywhr[4])))
-                    draw.line([center, endpoint], fill=(255, 255, 255), width=2)
+                    cv2.line(frame, center, endpoint, (255, 255, 255), 2)
                 
                 # Draw label
                 text_width, text_height = get_text_size(draw, label_text, font)
-                label_background = [(corners[0][0], corners[0][1] - text_height - 5),
-                                  (corners[0][0] + text_width + 5, corners[0][1])]
+                label_background = [(x1, y1 - text_height - 5),
+                                  (x1 + text_width + 5, y1)]
                 draw.rectangle(label_background, fill=color)
-                draw.text((corners[0][0] + 2, corners[0][1] - text_height - 3), 
+                draw.text((x1 + 2, y1 - text_height - 3), 
                           label_text, fill=(255, 255, 255), font=font)
 
     return np.array(pil_image), detected_objects, current_px_to_mm_ratio
