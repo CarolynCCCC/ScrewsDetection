@@ -387,8 +387,8 @@ def process_frame(frame, px_to_mm_ratio=None):
             # Get OBB corners
             corners = xywhr_to_corners(xywhr)
             
-            # Draw OBB
-            cv2.polylines(frame_rgb, [corners.astype(np.int32)], True, (255, 0, 0), 2)
+            # Draw OBB with class-specific color
+            cv2.polylines(frame_rgb, [corners.astype(np.int32)], True, color, 2)
             
             # Draw orientation indicator if enabled
             if SHOW_ORIENTATION:
