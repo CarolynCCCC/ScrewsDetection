@@ -348,16 +348,7 @@ def process_frame(frame, px_to_mm_ratio=None):
                 
                 # Create a mask for the OBB region
                 mask = np.zeros(frame.shape[:2], dtype=np.uint8)
-                
-                # Create a slightly smaller version of the OBB for contour detection
-                # to avoid detecting the bounding box edges
-                shrink_factor = 0.95  # Shrink the OBB by 5%
-                shrunk_corners = corners.copy()
-                center = np.mean(corners, axis=0)
-                shrunk_corners = center + (shrunk_corners - center) * shrink_factor
-                
-                # Draw the shrunk OBB on the mask
-                cv2.fillPoly(mask, [shrunk_corners.astype(np.int32)], 255)
+                cv2.fillPoly(mask, [corners.astype(np.int32)], 255)
                 
                 # Extract the OBB region
                 roi = cv2.bitwise_and(frame_rgb, frame_rgb, mask=mask)
@@ -396,24 +387,21 @@ def process_frame(frame, px_to_mm_ratio=None):
                         
                         # Adjust contour coordinates to global image coordinates
                         final_contour = largest_contour + np.array([x1, y1])
+                        
+                        # Draw contour first
+                        cv2.drawContours(frame_rgb, [final_contour], -1, color, 3, lineType=cv2.LINE_AA)
                 
-                # Now do all drawing operations after contour detection
-                
-                # 1. Draw OBB
+                # Now draw the OBB and other elements on top
                 cv2.polylines(frame_rgb, [corners.astype(np.int32)], True, (255, 0, 0), 2)
                 
-                # 2. Draw contour if found
-                if final_contour is not None:
-                    cv2.drawContours(frame_rgb, [final_contour], -1, color, 3, lineType=cv2.LINE_AA)
-                
-                # 3. Draw orientation indicator if enabled
+                # Draw orientation indicator if enabled
                 if SHOW_ORIENTATION:
                     center = (int(xywhr[0]), int(xywhr[1]))
                     endpoint = (int(center[0] + 20 * math.cos(xywhr[4])), 
-                                int(center[1] + 20 * math.sin(xywhr[4])))
+                              int(center[1] + 20 * math.sin(xywhr[4])))
                     cv2.line(frame_rgb, center, endpoint, (255, 255, 255), 2)
                 
-                # 4. Draw label background and text last
+                # Draw label background and text last
                 font = cv2.FONT_HERSHEY_SIMPLEX
                 font_scale = 0.5
                 thickness = 2
