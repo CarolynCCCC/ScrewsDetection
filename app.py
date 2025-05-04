@@ -59,15 +59,33 @@ if 'tracked_objects' not in st.session_state:
     st.session_state.tracked_objects = {}  # Changed from set to dict to store class info
 if 'binary_threshold' not in st.session_state:
     st.session_state.binary_threshold = 150
+if 'blur_kernel' not in st.session_state:
+    st.session_state.blur_kernel = 5
+if 'erode_iterations' not in st.session_state:
+    st.session_state.erode_iterations = 1
+if 'dilate_iterations' not in st.session_state:
+    st.session_state.dilate_iterations = 1
 
 # Sidebar controls
 with st.sidebar:
     st.header("Settings")
     
-    # Binary threshold slider
+    # Image Processing Controls
+    st.subheader("Image Processing")
     binary_threshold = st.slider("Binary Threshold", 0, 255, 150)
     st.session_state.binary_threshold = binary_threshold
     
+    blur_kernel = st.slider("Blur Kernel Size", 1, 15, 5, step=2)
+    st.session_state.blur_kernel = blur_kernel
+    
+    erode_iterations = st.slider("Erode Iterations", 0, 5, 1)
+    st.session_state.erode_iterations = erode_iterations
+    
+    dilate_iterations = st.slider("Dilate Iterations", 0, 5, 1)
+    st.session_state.dilate_iterations = dilate_iterations
+    
+    # Detection Controls
+    st.subheader("Detection Settings")
     input_method = st.radio(
         "Input Source",
         ("Webcam (Live Camera)", "Upload Image", "Upload Video"),
@@ -336,12 +354,29 @@ def process_frame(frame, px_to_mm_ratio=None):
                 roi = cv2.bitwise_and(frame_rgb, frame_rgb, mask=mask)
                 roi = roi[y1:y2, x1:x2]  # Crop to the axis-aligned bbox for processing
                 
+                # Store contour for later drawing
+                final_contour = None
+                
                 if roi.size > 0:  # Check if ROI is valid
                     # Convert ROI to grayscale
                     gray = cv2.cvtColor(roi, cv2.COLOR_RGB2GRAY)
                     
-                    # Apply binary thresholding with the slider value
-                    _, thresh = cv2.threshold(gray, st.session_state.binary_threshold, 255, cv2.THRESH_BINARY)
+                    # Apply Gaussian blur to reduce noise
+                    blurred = cv2.GaussianBlur(gray, (st.session_state.blur_kernel, st.session_state.blur_kernel), 0)
+                    
+                    # Apply binary thresholding
+                    _, thresh = cv2.threshold(blurred, st.session_state.binary_threshold, 255, cv2.THRESH_BINARY)
+                    
+                    # Create kernel for morphological operations
+                    kernel = np.ones((3,3), np.uint8)
+                    
+                    # Apply erosion to remove small noise
+                    if st.session_state.erode_iterations > 0:
+                        thresh = cv2.erode(thresh, kernel, iterations=st.session_state.erode_iterations)
+                    
+                    # Apply dilation to connect nearby components
+                    if st.session_state.dilate_iterations > 0:
+                        thresh = cv2.dilate(thresh, kernel, iterations=st.session_state.dilate_iterations)
                     
                     # Find contours
                     contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
@@ -351,34 +386,35 @@ def process_frame(frame, px_to_mm_ratio=None):
                         largest_contour = max(contours, key=cv2.contourArea)
                         
                         # Adjust contour coordinates to global image coordinates
-                        adjusted_contour = largest_contour + np.array([x1, y1])
-                        
-                        # Draw contour with thicker lines
-                        cv2.drawContours(frame_rgb, [adjusted_contour], -1, color, 3, lineType=cv2.LINE_AA)
+                        final_contour = largest_contour + np.array([x1, y1])
                 
-                # Draw OBB
+                # Now do all drawing operations after contour detection
+                
+                # 1. Draw OBB
                 cv2.polylines(frame_rgb, [corners.astype(np.int32)], True, (255, 0, 0), 2)
                 
-                # Draw orientation indicator if enabled
+                # 2. Draw contour if found
+                if final_contour is not None:
+                    cv2.drawContours(frame_rgb, [final_contour], -1, color, 3, lineType=cv2.LINE_AA)
+                
+                # 3. Draw orientation indicator if enabled
                 if SHOW_ORIENTATION:
                     center = (int(xywhr[0]), int(xywhr[1]))
                     endpoint = (int(center[0] + 20 * math.cos(xywhr[4])), 
                                 int(center[1] + 20 * math.sin(xywhr[4])))
                     cv2.line(frame_rgb, center, endpoint, (255, 255, 255), 2)
                 
-                # Draw label background and text
+                # 4. Draw label background and text last
                 font = cv2.FONT_HERSHEY_SIMPLEX
                 font_scale = 0.5
                 thickness = 2
                 (text_width, text_height), _ = cv2.getTextSize(label_text, font, font_scale, thickness)
                 
-                # Draw label background
                 cv2.rectangle(frame_rgb, 
                             (x1, y1 - text_height - 10),
                             (x1 + text_width + 10, y1),
                             color, -1)
                 
-                # Draw text
                 cv2.putText(frame_rgb, label_text,
                           (x1 + 5, y1 - 5),
                           font, font_scale,
