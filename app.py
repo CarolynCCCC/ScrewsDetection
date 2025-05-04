@@ -296,8 +296,17 @@ def process_frame(frame, px_to_mm_ratio=None):
                 label_text += ", Dia: N/A (No Ratio)"
 
             if SHOW_DETECTIONS:
-                # Create a region of interest (ROI) for the detection
-                roi = frame_rgb[y1:y2, x1:x2]
+                # Get OBB corners
+                corners = xywhr_to_corners(xywhr)
+                
+                # Create a mask for the OBB region
+                mask = np.zeros(frame.shape[:2], dtype=np.uint8)
+                cv2.fillPoly(mask, [corners.astype(np.int32)], 255)
+                
+                # Extract the OBB region
+                roi = cv2.bitwise_and(frame_rgb, frame_rgb, mask=mask)
+                roi = roi[y1:y2, x1:x2]  # Crop to the axis-aligned bbox for processing
+                
                 if roi.size > 0:  # Check if ROI is valid
                     # Convert ROI to grayscale
                     gray = cv2.cvtColor(roi, cv2.COLOR_RGB2GRAY)
@@ -324,9 +333,9 @@ def process_frame(frame, px_to_mm_ratio=None):
                         
                         # Draw contour with thicker lines
                         cv2.drawContours(frame_rgb, [adjusted_contour], -1, color, 3, lineType=cv2.LINE_AA)
-                        
-                        # Draw the bounding box for reference
-                        cv2.rectangle(frame_rgb, (x1, y1), (x2, y2), (255, 0, 0), 2)
+                
+                # Draw OBB
+                cv2.polylines(frame_rgb, [corners.astype(np.int32)], True, (255, 0, 0), 2)
                 
                 # Draw orientation indicator if enabled
                 if SHOW_ORIENTATION:
