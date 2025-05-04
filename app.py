@@ -148,55 +148,28 @@ def xywhr_to_corners(xywhr):
     return rotated_corners.astype(int)
 
 def non_max_suppression(detections, iou_threshold):
-    """Improved NMS for OBB that keeps multiple non-overlapping boxes"""
+    """Improved NMS for OBB that keeps only the highest confidence detection for each class"""
     if len(detections) == 0:
         return []
 
-    boxes = []
-    scores = []
-    classes = []
-
+    # Group detections by class
+    class_detections = {}
     for det in detections:
-        if len(det.xyxy) > 0:
-            boxes.append(det.xyxy[0].cpu().numpy())
-            scores.append(det.conf[0].cpu().numpy())
-            classes.append(det.cls[0].cpu().numpy())
+        if len(det.cls) > 0:
+            class_id = int(det.cls[0])
+            if class_id not in class_detections:
+                class_detections[class_id] = []
+            class_detections[class_id].append(det)
 
-    if not boxes:
-        return []
+    # Keep only the highest confidence detection for each class
+    final_detections = []
+    for class_id, dets in class_detections.items():
+        if dets:
+            # Sort by confidence and keep the highest
+            highest_conf_det = max(dets, key=lambda x: x.conf[0])
+            final_detections.append(highest_conf_det)
 
-    boxes = np.array(boxes)
-    scores = np.array(scores)
-    classes = np.array(classes)
-    indices = np.argsort(scores)[::-1]
-    keep_indices = []
-
-    while len(indices) > 0:
-        current = indices[0]
-        keep_indices.append(current)
-        rest = indices[1:]
-
-        ious = []
-        for i in rest:
-            box1 = boxes[current]
-            box2 = boxes[i]
-            xA = max(box1[0], box2[0])
-            yA = max(box1[1], box2[1])
-            xB = min(box1[2], box2[2])
-            yB = min(box1[3], box2[3])
-            interArea = max(0, xB - xA) * max(0, yB - yA)
-            box1Area = (box1[2] - box1[0]) * (box1[3] - box1[1])
-            box2Area = (box2[2] - box2[0]) * (box2[3] - box1[1])
-            unionArea = box1Area + box2Area - interArea
-            iou = interArea / unionArea if unionArea > 0 else 0.0
-            ious.append(iou)
-
-        ious = np.array(ious)
-        same_class = (classes[rest] == classes[current])
-        to_keep = ~(same_class & (ious > iou_threshold))
-        indices = rest[to_keep]
-
-    return [detections[i] for i in keep_indices]
+    return final_detections
 
 def generate_object_id(bbox, class_name):
     """Generate a unique ID based on bbox and class"""
@@ -378,22 +351,26 @@ def process_frame(frame, px_to_mm_ratio=None):
                     if st.session_state.dilate_iterations > 0:
                         thresh = cv2.dilate(thresh, kernel, iterations=st.session_state.dilate_iterations)
                     
-                    # Find contours with CHAIN_APPROX_SIMPLE for smoother results
-                    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                    # Find contours with CHAIN_APPROX_NONE to get all points
+                    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
                     
                     if contours:
-                        # Get the largest contour
-                        largest_contour = max(contours, key=cv2.contourArea)
+                        # Get all contours that are significant (not too small)
+                        significant_contours = []
+                        for contour in contours:
+                            area = cv2.contourArea(contour)
+                            if area > 100:  # Minimum area threshold
+                                significant_contours.append(contour)
                         
-                        # Apply contour approximation to further smooth the contour
-                        epsilon = 0.01 * cv2.arcLength(largest_contour, True)
-                        largest_contour = cv2.approxPolyDP(largest_contour, epsilon, True)
-                        
-                        # Adjust contour coordinates to global image coordinates
-                        final_contour = largest_contour + np.array([x1, y1])
-                        
-                        # Draw contour first with anti-aliasing
-                        cv2.drawContours(frame_rgb, [final_contour], -1, color, 3, lineType=cv2.LINE_AA)
+                        if significant_contours:
+                            # Sort contours by area and get the largest one
+                            largest_contour = max(significant_contours, key=cv2.contourArea)
+                            
+                            # Adjust contour coordinates to global image coordinates
+                            final_contour = largest_contour + np.array([x1, y1])
+                            
+                            # Draw contour first with anti-aliasing
+                            cv2.drawContours(frame_rgb, [final_contour], -1, color, 3, lineType=cv2.LINE_AA)
                 
                 # Now draw the OBB and other elements on top
                 cv2.polylines(frame_rgb, [corners.astype(np.int32)], True, (255, 0, 0), 2)
