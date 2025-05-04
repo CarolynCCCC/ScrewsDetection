@@ -229,16 +229,9 @@ def process_frame(frame, px_to_mm_ratio=None):
     result = results[0]
     filtered_detections = non_max_suppression(result.obb, IOU_THRESHOLD)
     
-    pil_image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-    draw = ImageDraw.Draw(pil_image)
+    # Convert frame to RGB for drawing
+    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     
-    try:
-        font = ImageFont.truetype("arial.ttf", LABEL_FONT_SIZE)
-    except:
-        font = ImageFont.load_default()
-        if hasattr(font, 'size'):
-            font.size = LABEL_FONT_SIZE
-
     detected_objects = []
     current_px_to_mm_ratio = px_to_mm_ratio
     
@@ -297,24 +290,34 @@ def process_frame(frame, px_to_mm_ratio=None):
                 contour = xywhr_to_contour(xywhr, frame.shape)
                 if contour is not None:
                     # Draw contour
-                    cv2.drawContours(frame, [contour], -1, color, BORDER_WIDTH)
+                    cv2.drawContours(frame_rgb, [contour], -1, color, BORDER_WIDTH)
                 
                 # Draw orientation indicator if enabled
                 if SHOW_ORIENTATION:
                     center = (int(xywhr[0]), int(xywhr[1]))
                     endpoint = (int(center[0] + 20 * math.cos(xywhr[4])), 
                                 int(center[1] + 20 * math.sin(xywhr[4])))
-                    cv2.line(frame, center, endpoint, (255, 255, 255), 2)
+                    cv2.line(frame_rgb, center, endpoint, (255, 255, 255), 2)
                 
-                # Draw label
-                text_width, text_height = get_text_size(draw, label_text, font)
-                label_background = [(x1, y1 - text_height - 5),
-                                  (x1 + text_width + 5, y1)]
-                draw.rectangle(label_background, fill=color)
-                draw.text((x1 + 2, y1 - text_height - 3), 
-                          label_text, fill=(255, 255, 255), font=font)
+                # Draw label background and text
+                font = cv2.FONT_HERSHEY_SIMPLEX
+                font_scale = 0.5
+                thickness = 2
+                (text_width, text_height), _ = cv2.getTextSize(label_text, font, font_scale, thickness)
+                
+                # Draw label background
+                cv2.rectangle(frame_rgb, 
+                            (x1, y1 - text_height - 10),
+                            (x1 + text_width + 10, y1),
+                            color, -1)
+                
+                # Draw text
+                cv2.putText(frame_rgb, label_text,
+                          (x1 + 5, y1 - 5),
+                          font, font_scale,
+                          (255, 255, 255), thickness)
 
-    return np.array(pil_image), detected_objects, current_px_to_mm_ratio
+    return frame_rgb, detected_objects, current_px_to_mm_ratio
 
 class VideoCallback:
     def __init__(self):
