@@ -290,9 +290,6 @@ def apply_edge_detection(image, method="Canny", **kwargs):
 
 def process_frame(frame, px_to_mm_ratio=None):
     """Process a single frame and return annotated image and detection data"""
-    # Make a copy of the original frame for contour detection
-    original_frame = frame.copy()
-    
     results = model(frame, conf=CONFIDENCE_THRESHOLD)
     if not results:
         return frame, [], px_to_mm_ratio
@@ -306,16 +303,7 @@ def process_frame(frame, px_to_mm_ratio=None):
     detected_objects = []
     current_px_to_mm_ratio = px_to_mm_ratio
     
-    # Find reference coin for scaling if one exists
-    for detection in filtered_detections:
-        if len(detection.cls) > 0 and detection.cls[0] == COIN_CLASS_ID:
-            if len(detection.xywhr) > 0:
-                xywhr = detection.xywhr[0].cpu().numpy()
-                coin_diameter_px = (xywhr[2] + xywhr[3]) / 2  # Average of width and height
-                current_px_to_mm_ratio = COIN_DIAMETER_MM / coin_diameter_px
-                break
-    
-    # Process each detection - first find contours on the original frame
+    # First pass: Find and draw contours for all detections
     for detection in filtered_detections:
         if len(detection.cls) > 0 and len(detection.xywhr) > 0 and len(detection.xyxy) > 0:
             class_id = int(detection.cls[0])
@@ -324,57 +312,77 @@ def process_frame(frame, px_to_mm_ratio=None):
             x1, y1, x2, y2 = map(int, detection.xyxy[0])
             class_name = CLASS_NAMES.get(class_id, f"Class {int(class_id)}")
             color = CATEGORY_COLORS.get(class_name, (0, 255, 0))
+
+            # Get OBB corners
+            corners = xywhr_to_corners(xywhr)
             
-            # Get the center of the detection
-            center_x, center_y = int(xywhr[0]), int(xywhr[1])
+            # Create a slightly larger mask for contour detection
+            # while keeping the original OBB for visualization
+            expand_factor = 1.1  # Expand the mask by 10%
+            center = np.mean(corners, axis=0)
+            expanded_corners = corners.copy()
+            expanded_corners = center + (expanded_corners - center) * expand_factor
             
-            # Create a slightly expanded mask to include some context around the object
-            # This helps avoid detecting the edge of the mask as the contour
-            expansion_factor = 1.2  # Expand by 20%
-            
-            # Calculate expanded box dimensions
-            expanded_width = xywhr[2] * expansion_factor
-            expanded_height = xywhr[3] * expansion_factor
-            
-            # Create expanded corners - we keep the same orientation
-            expanded_corners = xywhr_to_corners([xywhr[0], xywhr[1], 
-                                               expanded_width, expanded_height, 
-                                               xywhr[4]])
-            
-            # Create mask from expanded corners
-            mask = np.zeros(original_frame.shape[:2], dtype=np.uint8)
+            # Create mask with expanded corners
+            mask = np.zeros(frame.shape[:2], dtype=np.uint8)
             cv2.fillPoly(mask, [expanded_corners.astype(np.int32)], 255)
             
-            # Extract region inside mask from original frame
-            roi = cv2.bitwise_and(original_frame, original_frame, mask=mask)
+            # Extract the OBB region with expanded mask
+            roi = cv2.bitwise_and(frame_rgb, frame_rgb, mask=mask)
+            roi = roi[y1:y2, x1:x2]  # Crop to the axis-aligned bbox for processing
             
-            # Convert ROI to grayscale
-            roi_gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-            
-            # Apply Gaussian blur to reduce noise
-            blurred = cv2.GaussianBlur(roi_gray, (st.session_state.blur_kernel, st.session_state.blur_kernel), 0)
-            
-            # Apply edge detection (Canny) instead of just thresholding
-            # This will find the edges of the object, not the edges of the mask
-            low_threshold = st.session_state.binary_threshold - 50  # Adjust based on your needs
-            high_threshold = st.session_state.binary_threshold + 50  # Adjust based on your needs
-            edges = cv2.Canny(blurred, low_threshold, high_threshold)
-            
-            # Dilate the edges to connect broken lines
-            kernel = np.ones((3, 3), np.uint8)
-            dilated_edges = cv2.dilate(edges, kernel, iterations=st.session_state.dilate_iterations)
-            
-            # Find contours on the edge image
-            contours, _ = cv2.findContours(dilated_edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            
-            if contours:
-                # Filter small contours
-                significant_contours = [c for c in contours if cv2.contourArea(c) > 20]
+            if roi.size > 0:  # Check if ROI is valid
+                # Convert ROI to grayscale
+                gray = cv2.cvtColor(roi, cv2.COLOR_RGB2GRAY)
                 
-                if significant_contours:
-                    # Draw the contours on the RGB frame
-                    cv2.drawContours(frame_rgb, significant_contours, -1, color, 2)
-            
+                # Apply Gaussian blur to smooth edges
+                blurred = cv2.GaussianBlur(gray, (st.session_state.blur_kernel, st.session_state.blur_kernel), 0)
+                
+                # Apply binary thresholding
+                _, thresh = cv2.threshold(blurred, st.session_state.binary_threshold, 255, cv2.THRESH_BINARY)
+                
+                # Create kernel for morphological operations
+                kernel = np.ones((3,3), np.uint8)
+                
+                # Apply erosion to remove small noise
+                if st.session_state.erode_iterations > 0:
+                    thresh = cv2.erode(thresh, kernel, iterations=st.session_state.erode_iterations)
+                
+                # Apply dilation to connect nearby components
+                if st.session_state.dilate_iterations > 0:
+                    thresh = cv2.dilate(thresh, kernel, iterations=st.session_state.dilate_iterations)
+                
+                # Find contours
+                contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+                
+                if contours:
+                    # Get all contours that are significant (not too small)
+                    significant_contours = []
+                    for contour in contours:
+                        area = cv2.contourArea(contour)
+                        if area > 100:  # Minimum area threshold
+                            significant_contours.append(contour)
+                    
+                    if significant_contours:
+                        # Sort contours by area and get the largest one
+                        largest_contour = max(significant_contours, key=cv2.contourArea)
+                        
+                        # Adjust contour coordinates to global image coordinates
+                        final_contour = largest_contour + np.array([x1, y1])
+                        
+                        # Draw contour
+                        cv2.drawContours(frame_rgb, [final_contour], -1, color, 3, lineType=cv2.LINE_AA)
+
+    # Second pass: Draw OBBs, orientation indicators, and labels
+    for detection in filtered_detections:
+        if len(detection.cls) > 0 and len(detection.xywhr) > 0 and len(detection.xyxy) > 0:
+            class_id = int(detection.cls[0])
+            confidence = detection.conf[0]
+            xywhr = detection.xywhr[0].cpu().numpy()
+            x1, y1, x2, y2 = map(int, detection.xyxy[0])
+            class_name = CLASS_NAMES.get(class_id, f"Class {int(class_id)}")
+            color = CATEGORY_COLORS.get(class_name, (0, 255, 0))
+
             # Generate unique ID for the object
             obj_id = generate_object_id((x1, y1, x2, y2), class_name)
             
@@ -387,17 +395,7 @@ def process_frame(frame, px_to_mm_ratio=None):
                     "orientation": float(xywhr[4])
                 })
                 st.session_state.tracked_objects[obj_id] = class_name
-    
-    # Now draw OBBs, orientation indicators, and labels on top of the contours
-    for detection in filtered_detections:
-        if len(detection.cls) > 0 and len(detection.xywhr) > 0 and len(detection.xyxy) > 0:
-            class_id = int(detection.cls[0])
-            confidence = detection.conf[0]
-            xywhr = detection.xywhr[0].cpu().numpy()
-            x1, y1, x2, y2 = map(int, detection.xyxy[0])
-            class_name = CLASS_NAMES.get(class_id, f"Class {int(class_id)}")
-            color = CATEGORY_COLORS.get(class_name, (0, 255, 0))
-            
+
             # Get OBB corners
             corners = xywhr_to_corners(xywhr)
             
@@ -443,6 +441,7 @@ def process_frame(frame, px_to_mm_ratio=None):
                       (255, 255, 255), thickness)
 
     return frame_rgb, detected_objects, current_px_to_mm_ratio
+
 class VideoCallback:
     def __init__(self):
         self.px_to_mm_ratio = None
