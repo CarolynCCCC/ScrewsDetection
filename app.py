@@ -361,7 +361,7 @@ def process_frame(frame, px_to_mm_ratio=None):
                     # Convert ROI to grayscale
                     gray = cv2.cvtColor(roi, cv2.COLOR_RGB2GRAY)
                     
-                    # Apply Gaussian blur to reduce noise
+                    # Apply stronger Gaussian blur to smooth edges
                     blurred = cv2.GaussianBlur(gray, (st.session_state.blur_kernel, st.session_state.blur_kernel), 0)
                     
                     # Apply binary thresholding
@@ -378,17 +378,21 @@ def process_frame(frame, px_to_mm_ratio=None):
                     if st.session_state.dilate_iterations > 0:
                         thresh = cv2.dilate(thresh, kernel, iterations=st.session_state.dilate_iterations)
                     
-                    # Find contours
-                    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+                    # Find contours with CHAIN_APPROX_SIMPLE for smoother results
+                    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
                     
                     if contours:
                         # Get the largest contour
                         largest_contour = max(contours, key=cv2.contourArea)
                         
+                        # Apply contour approximation to further smooth the contour
+                        epsilon = 0.01 * cv2.arcLength(largest_contour, True)
+                        largest_contour = cv2.approxPolyDP(largest_contour, epsilon, True)
+                        
                         # Adjust contour coordinates to global image coordinates
                         final_contour = largest_contour + np.array([x1, y1])
                         
-                        # Draw contour first
+                        # Draw contour first with anti-aliasing
                         cv2.drawContours(frame_rgb, [final_contour], -1, color, 3, lineType=cv2.LINE_AA)
                 
                 # Now draw the OBB and other elements on top
