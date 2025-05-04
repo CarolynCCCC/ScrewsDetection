@@ -322,33 +322,30 @@ def process_frame(frame, px_to_mm_ratio=None):
             expanded_corners = corners.copy()
             expanded_corners = center + (expanded_corners - center) * expand_factor
             
-            # Create outer mask with expanded corners
-            outer_mask = np.zeros(frame.shape[:2], dtype=np.uint8)
-            cv2.fillPoly(outer_mask, [expanded_corners.astype(np.int32)], 255)
+            # Create mask with expanded corners
+            mask = np.zeros(frame.shape[:2], dtype=np.uint8)
+            cv2.fillPoly(mask, [expanded_corners.astype(np.int32)], 255)
             
-            # Create inner mask slightly smaller than the original OBB
-            inner_mask = np.zeros(frame.shape[:2], dtype=np.uint8)
-            shrink_factor = 0.95  # Shrink by 5%
-            shrunk_corners = corners.copy()
-            shrunk_corners = center + (shrunk_corners - center) * shrink_factor
-            cv2.fillPoly(inner_mask, [shrunk_corners.astype(np.int32)], 255)
-            
-            # Create final mask by subtracting inner from outer
-            final_mask = cv2.subtract(outer_mask, inner_mask)
-            
-            # Extract the OBB region with the final mask
-            roi = cv2.bitwise_and(frame_rgb, frame_rgb, mask=final_mask)
+            # Extract the OBB region with expanded mask
+            roi = cv2.bitwise_and(frame_rgb, frame_rgb, mask=mask)
             roi = roi[y1:y2, x1:x2]  # Crop to the axis-aligned bbox for processing
             
             if roi.size > 0:  # Check if ROI is valid
                 # Convert ROI to grayscale
                 gray = cv2.cvtColor(roi, cv2.COLOR_RGB2GRAY)
                 
-                # Apply Gaussian blur to smooth edges
+                # Apply stronger Gaussian blur to reduce noise and smooth edges
                 blurred = cv2.GaussianBlur(gray, (st.session_state.blur_kernel, st.session_state.blur_kernel), 0)
                 
-                # Apply binary thresholding
-                _, thresh = cv2.threshold(blurred, st.session_state.binary_threshold, 255, cv2.THRESH_BINARY)
+                # Apply adaptive thresholding to better handle varying lighting
+                thresh = cv2.adaptiveThreshold(
+                    blurred, 
+                    255, 
+                    cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+                    cv2.THRESH_BINARY_INV, 
+                    11,  # block size
+                    2    # constant subtracted from mean
+                )
                 
                 # Create kernel for morphological operations
                 kernel = np.ones((3,3), np.uint8)
@@ -369,8 +366,15 @@ def process_frame(frame, px_to_mm_ratio=None):
                     significant_contours = []
                     for contour in contours:
                         area = cv2.contourArea(contour)
+                        # Filter out very small contours and those that are too close to the edges
                         if area > 100:  # Minimum area threshold
-                            significant_contours.append(contour)
+                            # Check if contour is too close to the edges
+                            x, y, w, h = cv2.boundingRect(contour)
+                            edge_margin = 5  # pixels from edge to ignore
+                            if (x > edge_margin and y > edge_margin and 
+                                x + w < roi.shape[1] - edge_margin and 
+                                y + h < roi.shape[0] - edge_margin):
+                                significant_contours.append(contour)
                     
                     if significant_contours:
                         # Sort contours by area and get the largest one
