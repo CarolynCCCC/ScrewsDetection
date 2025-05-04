@@ -322,12 +322,22 @@ def process_frame(frame, px_to_mm_ratio=None):
             expanded_corners = corners.copy()
             expanded_corners = center + (expanded_corners - center) * expand_factor
             
-            # Create mask with expanded corners
-            mask = np.zeros(frame.shape[:2], dtype=np.uint8)
-            cv2.fillPoly(mask, [expanded_corners.astype(np.int32)], 255)
+            # Create outer mask with expanded corners
+            outer_mask = np.zeros(frame.shape[:2], dtype=np.uint8)
+            cv2.fillPoly(outer_mask, [expanded_corners.astype(np.int32)], 255)
             
-            # Extract the OBB region with expanded mask
-            roi = cv2.bitwise_and(frame_rgb, frame_rgb, mask=mask)
+            # Create inner mask slightly smaller than the original OBB
+            inner_mask = np.zeros(frame.shape[:2], dtype=np.uint8)
+            shrink_factor = 0.95  # Shrink by 5%
+            shrunk_corners = corners.copy()
+            shrunk_corners = center + (shrunk_corners - center) * shrink_factor
+            cv2.fillPoly(inner_mask, [shrunk_corners.astype(np.int32)], 255)
+            
+            # Create final mask by subtracting inner from outer
+            final_mask = cv2.subtract(outer_mask, inner_mask)
+            
+            # Extract the OBB region with the final mask
+            roi = cv2.bitwise_and(frame_rgb, frame_rgb, mask=final_mask)
             roi = roi[y1:y2, x1:x2]  # Crop to the axis-aligned bbox for processing
             
             if roi.size > 0:  # Check if ROI is valid
@@ -359,8 +369,7 @@ def process_frame(frame, px_to_mm_ratio=None):
                     significant_contours = []
                     for contour in contours:
                         area = cv2.contourArea(contour)
-                        # Filter out contours that are too small or too large (likely the bounding box)
-                        if area > 100 and area < (roi.shape[0] * roi.shape[1] * 0.8):  # Max 80% of ROI area
+                        if area > 100:  # Minimum area threshold
                             significant_contours.append(contour)
                     
                     if significant_contours:
