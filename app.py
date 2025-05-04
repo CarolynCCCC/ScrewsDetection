@@ -348,7 +348,16 @@ def process_frame(frame, px_to_mm_ratio=None):
                 
                 # Create a mask for the OBB region
                 mask = np.zeros(frame.shape[:2], dtype=np.uint8)
-                cv2.fillPoly(mask, [corners.astype(np.int32)], 255)
+                
+                # Create a slightly smaller version of the OBB for contour detection
+                # to avoid detecting the bounding box edges
+                shrink_factor = 0.95  # Shrink the OBB by 5%
+                shrunk_corners = corners.copy()
+                center = np.mean(corners, axis=0)
+                shrunk_corners = center + (shrunk_corners - center) * shrink_factor
+                
+                # Draw the shrunk OBB on the mask
+                cv2.fillPoly(mask, [shrunk_corners.astype(np.int32)], 255)
                 
                 # Extract the OBB region
                 roi = cv2.bitwise_and(frame_rgb, frame_rgb, mask=mask)
