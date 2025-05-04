@@ -61,6 +61,7 @@ if 'tracked_objects' not in st.session_state:
 # Sidebar controls
 with st.sidebar:
     st.header("Settings")
+    
     input_method = st.radio(
         "Input Source",
         ("Webcam (Live Camera)", "Upload Image", "Upload Video"),
@@ -230,6 +231,28 @@ def xywhr_to_contour(xywhr, image_shape):
         return contour
     return None
 
+def apply_edge_detection(image, method="Canny", **kwargs):
+    """Apply different edge detection methods"""
+    if method == "Canny":
+        return cv2.Canny(image, kwargs.get('low', 50), kwargs.get('high', 150))
+    elif method == "Sobel":
+        dx = cv2.Sobel(image, cv2.CV_64F, 1, 0, ksize=kwargs.get('ksize', 3))
+        dy = cv2.Sobel(image, cv2.CV_64F, 0, 1, ksize=kwargs.get('ksize', 3))
+        return cv2.magnitude(dx, dy)
+    elif method == "Laplacian":
+        return cv2.Laplacian(image, cv2.CV_64F, ksize=kwargs.get('ksize', 3))
+    elif method == "Scharr":
+        dx = cv2.Scharr(image, cv2.CV_64F, 1, 0)
+        dy = cv2.Scharr(image, cv2.CV_64F, 0, 1)
+        return cv2.magnitude(dx, dy)
+    elif method == "Prewitt":
+        kernelx = np.array([[1,1,1],[0,0,0],[-1,-1,-1]])
+        kernely = np.array([[-1,0,1],[-1,0,1],[-1,0,1]])
+        dx = cv2.filter2D(image, cv2.CV_64F, kernelx)
+        dy = cv2.filter2D(image, cv2.CV_64F, kernely)
+        return cv2.magnitude(dx, dy)
+    return image
+
 def process_frame(frame, px_to_mm_ratio=None):
     """Process a single frame and return annotated image and detection data"""
     results = model(frame, conf=CONFIDENCE_THRESHOLD)
@@ -311,18 +334,11 @@ def process_frame(frame, px_to_mm_ratio=None):
                     # Convert ROI to grayscale
                     gray = cv2.cvtColor(roi, cv2.COLOR_RGB2GRAY)
                     
-                    # Apply Gaussian blur to reduce noise
-                    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-                    
-                    # Apply Canny edge detection
-                    edges = cv2.Canny(blurred, 50, 150)
-                    
-                    # Dilate the edges to make them more connected
-                    kernel = np.ones((3,3), np.uint8)
-                    dilated = cv2.dilate(edges, kernel, iterations=1)
+                    # Apply binary thresholding
+                    _, thresh = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY)
                     
                     # Find contours
-                    contours, _ = cv2.findContours(dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
                     
                     if contours:
                         # Get the largest contour
